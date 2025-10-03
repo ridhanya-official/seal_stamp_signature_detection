@@ -245,7 +245,7 @@ if uploaded_file:
     if file_ext in ["jpg", "jpeg", "png"]:
         nparr = np.frombuffer(file_bytes, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        decision, response, step_used, elapsed_time, tokens_used, spec_text, enhanced_image = processor._classify(image, os.path.splitext(filename)[0])
+        decision, response, step_used, elapsed_time, tokens_used, spec_text, enhanced_image = processor._classify(image, "image", os.path.splitext(filename)[0])
 
         # Print decision
         if decision.lower() == "yes":
@@ -272,7 +272,7 @@ if uploaded_file:
             page.save(buffer, format="JPEG")
             np_img = np.frombuffer(buffer.getvalue(), np.uint8)
             image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-            decision, response, step_used, elapsed_time, tokens_used, spec_text, enhanced_image = processor._classify(image, f"{os.path.splitext(filename)[0]}_page{i}")
+            decision, response, step_used, elapsed_time, tokens_used, spec_text, enhanced_image = processor._classify(image, "pdf", f"{os.path.splitext(filename)[0]}_page{i}")
 
             if decision.lower() == "yes":
                 st.markdown(f"### ✅ Page {i} - Is Seal: Yes")
