@@ -25,7 +25,7 @@ class Config:
 
     # ---- Root Settings ----
     ROOT_DIR = st.secrets["ROOT_DIR"]
-    INPUT_PATH = st.secrets("INPUT_PATH", "image.jpg")
+    # INPUT_PATH = st.secrets("INPUT_PATH", "image.jpg")
 
     # ---- Derived Paths ----
     OUTPUT_YES = os.path.join(ROOT_DIR, "yes")
