@@ -231,7 +231,7 @@ Config.init_dirs()
 analyzer = GPTImageAnalyzer(Config)
 processor = Processor(analyzer, Config)
 
-uploaded_file = st.file_uploader("Upload an image or PDF", type=["jpg", "jpeg", "png", "pdf"])
+uploaded_file = st.file_uploader("Upload an image or PDF", type=["jpg", "jpeg", "png", "pdf"], accept_multiple_files=True)
 
 if uploaded_file:
     file_bytes = uploaded_file.read()
