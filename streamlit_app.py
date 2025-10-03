@@ -257,7 +257,7 @@ if uploaded_files:
                 image, "image", os.path.splitext(filename)[0]
             )
 
-            st.markdown(f"### {'✅ Yes' if decision.lower() == 'yes' else '❌ No'} - {filename}")
+            st.markdown(f"### Is Seal ? {'✅ Yes' if decision.lower() == 'yes' else '❌ No'}")
 
             # Resize image before display
             h, w = enhanced_image.shape[:2]
@@ -284,7 +284,7 @@ if uploaded_files:
                     image, "pdf", f"{os.path.splitext(filename)[0]}_page{i}"
                 )
 
-                st.markdown(f"### Page {i} - {'✅ Yes' if decision.lower() == 'yes' else '❌ No'} - {filename}")
+                st.markdown(f"### Is Seal ? {'✅ Yes' if decision.lower() == 'yes' else '❌ No'}")
 
                 h, w = enhanced_image.shape[:2]
                 max_width = 600
