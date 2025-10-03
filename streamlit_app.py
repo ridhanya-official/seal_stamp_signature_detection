@@ -292,7 +292,7 @@ if uploaded_file:
     csv_buffer.seek(0)
     st.download_button(
         label="📥 Download Classification CSV",
-        data=csv_buffer.getvalue(),
+        data=csv_buffer.getvalue().encode("utf-8"),
         file_name="classification_log.csv",
         mime="text/csv"
     )
