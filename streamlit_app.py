@@ -24,7 +24,7 @@ class Config:
     """Holds configuration constants for the pipeline."""
 
     # ---- Root Settings ----
-    ROOT_DIR = st.secrets("ROOT_DIR")
+    ROOT_DIR = st.secrets["ROOT_DIR"]
     INPUT_PATH = st.secrets("INPUT_PATH", "image.jpg")
 
     # ---- Derived Paths ----
@@ -34,10 +34,10 @@ class Config:
     ENHANCED_DIR = os.path.join(ROOT_DIR, "enhanced_images")
 
     # ---- Azure OpenAI configuration ----
-    API_KEY = st.secrets("AZURE_API_KEY")
-    ENDPOINT = st.secrets("AZURE_ENDPOINT")
-    API_VERSION = st.secrets("AZURE_API_VERSION")
-    MODEL_NAME = st.secrets("AZURE_DEPLOYMENT_NAME")
+    API_KEY = st.secrets["AZURE_API_KEY"]
+    ENDPOINT = st.secrets["AZURE_ENDPOINT"]
+    API_VERSION = st.secrets["AZURE_API_VERSION"]
+    MODEL_NAME = st.secrets["AZURE_DEPLOYMENT_NAME"]
 
     PROMPT = prompt_v2
 
