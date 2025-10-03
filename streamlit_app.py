@@ -231,69 +231,76 @@ Config.init_dirs()
 analyzer = GPTImageAnalyzer(Config)
 processor = Processor(analyzer, Config)
 
-uploaded_files = st.file_uploader("Upload an image or PDF", type=["jpg", "jpeg", "png", "pdf"], accept_multiple_files=True)
+# Allow multiple file upload
+uploaded_files = st.file_uploader(
+    "Upload images or PDFs (multiple allowed)", 
+    type=["jpg", "jpeg", "png", "pdf"], 
+    accept_multiple_files=True
+)
 
 if uploaded_files:
+    # Create CSV buffer once
+    csv_buffer = StringIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(["filename", "filetype", "page", "decision", "step_used", 
+                     "response_text", "time_taken_sec", "tokens_used", "specification"])
+
     for uploaded_file in uploaded_files:
         file_bytes = uploaded_file.read()
         filename = uploaded_file.name
         file_ext = filename.split(".")[-1].lower()
-    
-        csv_buffer = StringIO()
-        writer = csv.writer(csv_buffer)
-        writer.writerow(["filename", "filetype", "page", "decision", "step_used", "response_text", "time_taken_sec", "tokens_used", "specification"])
-    
+
         if file_ext in ["jpg", "jpeg", "png"]:
             nparr = np.frombuffer(file_bytes, np.uint8)
             image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            decision, response, step_used, elapsed_time, tokens_used, spec_text, enhanced_image = processor._classify(image, "image", os.path.splitext(filename)[0])
-    
-            # Print decision
-            if decision.lower() == "yes":
-                st.markdown(f"### ✅ Is Seal: Yes")
-            else:
-                st.markdown(f"### ❌ Is Seal: No")
-    
-            # Resize image for display
+            decision, response, step_used, elapsed_time, tokens_used, spec_text, enhanced_image = processor._classify(
+                image, "image", os.path.splitext(filename)[0]
+            )
+
+            st.markdown(f"### {'✅ Yes' if decision.lower() == 'yes' else '❌ No'} - {filename}")
+
+            # Resize image before display
             h, w = enhanced_image.shape[:2]
             max_width = 600
             if w > max_width:
                 scale = max_width / w
                 enhanced_image = cv2.resize(enhanced_image, (int(w * scale), int(h * scale)))
-    
-            st.image(cv2.cvtColor(enhanced_image, cv2.COLOR_BGR2RGB), caption=f"{filename}")
-    
-            writer.writerow([filename, "image", "-", decision, step_used, response, round(elapsed_time, 2), tokens_used, spec_text])
-    
+
+            st.image(cv2.cvtColor(enhanced_image, cv2.COLOR_BGR2RGB), caption=filename)
+
+            writer.writerow([filename, "image", "-", decision, step_used, response, 
+                             round(elapsed_time, 2), tokens_used, spec_text])
+
         elif file_ext == "pdf":
             from pdf2image import convert_from_bytes
             pages = convert_from_bytes(file_bytes)
+
             for i, page in enumerate(pages, start=1):
                 buffer = BytesIO()
                 page.save(buffer, format="JPEG")
                 np_img = np.frombuffer(buffer.getvalue(), np.uint8)
                 image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-                decision, response, step_used, elapsed_time, tokens_used, spec_text, enhanced_image = processor._classify(image, "pdf", f"{os.path.splitext(filename)[0]}_page{i}")
-    
-                if decision.lower() == "yes":
-                    st.markdown(f"### ✅ Page {i} - Is Seal: Yes")
-                else:
-                    st.markdown(f"### ❌ Page {i} - Is Seal: No")
-    
+                decision, response, step_used, elapsed_time, tokens_used, spec_text, enhanced_image = processor._classify(
+                    image, "pdf", f"{os.path.splitext(filename)[0]}_page{i}"
+                )
+
+                st.markdown(f"### Page {i} - {'✅ Yes' if decision.lower() == 'yes' else '❌ No'} - {filename}")
+
                 h, w = enhanced_image.shape[:2]
                 max_width = 600
                 if w > max_width:
                     scale = max_width / w
                     enhanced_image = cv2.resize(enhanced_image, (int(w * scale), int(h * scale)))
-                st.image(cv2.cvtColor(enhanced_image, cv2.COLOR_BGR2RGB), caption=f"Page {i}")
-    
-                writer.writerow([filename, "pdf", i, decision, step_used, response, round(elapsed_time, 2), tokens_used, spec_text])
-    
-        # Download CSV
-        csv_buffer.seek(0)
-        st.download_button(
-            label="📥 Download Classification CSV",
-            data=csv_buffer.getvalue().encode("utf-8"),
-            file_name="classification_log.csv",
-            mime="text/csv"
-        )
+                st.image(cv2.cvtColor(enhanced_image, cv2.COLOR_BGR2RGB), caption=f"{filename} - Page {i}")
+
+                writer.writerow([filename, "pdf", i, decision, step_used, response, 
+                                 round(elapsed_time, 2), tokens_used, spec_text])
+
+    # Download one CSV for all files
+    csv_buffer.seek(0)
+    st.download_button(
+        label="📥 Download Detection CSV",
+        data=csv_buffer.getvalue().encode("utf-8"),
+        file_name="detection_log.csv",
+        mime="text/csv"
+    )
