@@ -205,8 +205,8 @@ def main():
 
                     st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), caption=f"{filename}")
 
-                    results.append([filename, "image", decision, response, tokens, round(elapsed_time, 2)])
-                    writer.writerow([filename, "image", decision, response, tokens, round(elapsed_time, 2)])
+                    results.append([filename, "image", decision, round(elapsed_time, 2)])
+                    writer.writerow([filename, "image", decision, round(elapsed_time, 2)])
 
         st.success("Classification complete. Log file generated.")
 
