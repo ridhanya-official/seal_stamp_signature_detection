@@ -235,7 +235,7 @@ processor = Processor(analyzer, Config)
 # Allow multiple file upload
 uploaded_files = st.file_uploader(
     "Upload images or PDFs (multiple allowed)", 
-    type=["jpg", "jpeg", "png", "pdf"], 
+    type=["jpg", "jpeg", "png"], 
     accept_multiple_files=True
 )
 
@@ -273,14 +273,9 @@ if uploaded_files:
                              round(elapsed_time, 2), tokens_used, spec_text])
 
         elif file_ext == "pdf":
-            from pdf2image import convert_from_bytes
-            # Save PDF temporarily
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                tmp_file.write(uploaded_file.read())
-                tmp_path = tmp_file.name
-                
-            pages = convert_from_path(tmp_path)
-
+            from pdf2image import convert_from_bytes                
+            pages = convert_from_bytes(file_bytes)
+            
             for i, page in enumerate(pages, start=1):
                 buffer = BytesIO()
                 page.save(buffer, format="JPEG")
