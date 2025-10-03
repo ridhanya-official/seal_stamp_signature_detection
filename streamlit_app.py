@@ -9,13 +9,11 @@ import shutil
 import numpy as np
 import time
 from io import BytesIO
-from tqdm import tqdm
-from pdf2image import convert_from_path, convert_from_bytes
+from pdf2image import convert_from_path
 from openai import AzureOpenAI
 from prompt import prompt_v2
 from dotenv import load_dotenv
 import streamlit as st
-import pandas as pd
 
 load_dotenv()
 
@@ -46,7 +44,6 @@ class Config:
         os.makedirs(Config.OUTPUT_NO, exist_ok=True)
         os.makedirs(Config.ENHANCED_DIR, exist_ok=True)
 
-
 # ---------------- Analyzer ---------------- #
 class GPTImageAnalyzer:
     """Wrapper for Azure OpenAI GPT Vision model."""
@@ -61,9 +58,7 @@ class GPTImageAnalyzer:
         self.model = config.MODEL_NAME
 
     def analyze(self, image_bytes: bytes) -> dict:
-        """Send image bytes to Azure OpenAI and return the response and tokens."""
         encoded_image = base64.b64encode(image_bytes).decode("ascii")
-
         start_time = time.time()
         response = self.client.chat.completions.create(
             model=self.model,
@@ -87,17 +82,54 @@ class GPTImageAnalyzer:
             ],
         )
         end_time = time.time()
-
         tokens_used = response.usage.total_tokens if response.usage else 0
-
         return {
             "text": response.choices[0].message.content.strip(),
             "tokens": tokens_used,
             "time": end_time - start_time
         }
 
+    def extract_specification(self, image_bytes: bytes) -> dict:
+        encoded_image = base64.b64encode(image_bytes).decode("ascii")
+        prompt = (
+            "The previous classification detected a seal, stamp, or handwritten signature.\n"
+            "Please provide:\n"
+            "1. Type: seal / stamp / handwritten signature\n"
+            "2. Brief description of its appearance\n"
+            "3. Approximate location in the image (e.g., top-right corner)\n"
+        )
+        start_time = time.time()
+        response = self.client.chat.completions.create(
+            model=self.model,
+            temperature=0,
+            max_tokens=500,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{encoded_image}",
+                                "detail": "high",
+                            },
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                },
+            ],
+        )
+        end_time = time.time()
+        tokens_used = response.usage.total_tokens if response.usage else 0
+        return {
+            "specification": response.choices[0].message.content.strip(),
+            "tokens": tokens_used,
+            "time": end_time - start_time
+        }
 
-# ---------------- Enhancer (not used for display) ---------------- #
+
+# ---------------- Enhancer ---------------- #
 class Enhancer:
     """Applies image enhancement techniques."""
 
@@ -133,89 +165,102 @@ class Processor:
         self.analyzer = analyzer
         self.config = config
 
-    def _classify(self, image, base_name):
-        """Run analysis and return decision and metrics."""
-        _, buffer = cv2.imencode(".jpg", image)
-        image_bytes = buffer.tobytes()
+    def _classify(self, image, base_name, filetype, page="-"):
+        steps = [
+            ("original", lambda x: x),
+            ("coloured", Enhancer.coloured),
+            ("sharpened", Enhancer.sharpen),
+            ("gaussian", Enhancer.gaussian),
+        ]
 
-        result = self.analyzer.analyze(image_bytes)
-        response_text = result["text"]
-        tokens_used = result["tokens"]
-        elapsed_time = result["time"]
+        final_decision = "no"
+        response_text = ""
+        step_used = "none"
+        total_tokens = 0
+        total_time = 0.0
+        current_image = image
 
-        decision = "yes" if "yes" in response_text.lower() else "no"
+        for step_name, func in steps:
+            enhanced_image = func(current_image)
+            _, buffer = cv2.imencode(".jpg", enhanced_image)
+            image_bytes = buffer.tobytes()
+            result = self.analyzer.analyze(image_bytes)
+            response_text = result["text"]
+            total_tokens += result["tokens"]
+            total_time += result["time"]
+            if response_text and "yes" in response_text.lower():
+                final_decision = "yes"
+                step_used = step_name
+                out_name = f"{base_name}_{step_name}.jpg"
+                cv2.imwrite(os.path.join(self.config.ENHANCED_DIR, out_name), enhanced_image)
+                current_image = enhanced_image
+                break
+            current_image = enhanced_image
 
-        return decision, response_text, tokens_used, elapsed_time
+        if final_decision == "no":
+            equalized_image = Enhancer.equalize(current_image)
+            _, buffer = cv2.imencode(".jpg", equalized_image)
+            result = self.analyzer.analyze(buffer.tobytes())
+            response_text = result["text"]
+            total_tokens += result["tokens"]
+            total_time += result["time"]
+            if response_text and "yes" in response_text.lower():
+                final_decision = "yes"
+            step_used = "equalized"
+            out_name = f"{base_name}_equalized.jpg"
+            cv2.imwrite(os.path.join(self.config.ENHANCED_DIR, out_name), equalized_image)
+            current_image = equalized_image
+
+        if final_decision == "yes":
+            _, buffer = cv2.imencode(".jpg", current_image)
+            spec_result = self.analyzer.extract_specification(buffer.tobytes())
+            spec_text = spec_result["specification"]
+            total_tokens += spec_result["tokens"]
+            total_time += spec_result["time"]
+        else:
+            spec_text = "There was no detection of seal, stamp, or handwritten signature."
+
+        return final_decision, response_text, step_used, total_time, total_tokens, spec_text
 
 
-# ---------------- Streamlit UI ---------------- #
-def main():
+# ---------------- Streamlit Application ---------------- #
+st.set_page_config(page_title="Seal/Stamp/Signature Detection", layout="wide")
+st.title("📄 Seal/Stamp/Signature Detection")
+
+uploaded_files = st.file_uploader("Upload images or PDFs", accept_multiple_files=True, type=["jpg","jpeg","png","pdf"])
+
+if uploaded_files:
     Config.init_dirs()
     analyzer = GPTImageAnalyzer(Config)
-    processor = Processor(analyzer, Config)
 
-    st.title("📄 Seal / Stamp / Signature Detection")
-    uploaded_files = st.file_uploader(
-        "Upload Images or PDFs", type=["jpg", "jpeg", "png", "pdf"], accept_multiple_files=True
-    )
-
-    if uploaded_files:
-        results = []
-
-        with open(Config.LOG_FILE, "w", newline="", encoding="utf-8") as log_file:
-            writer = csv.writer(log_file)
-            writer.writerow(["filename", "filetype", "detection", "time_sec"])
-
-            for uploaded in uploaded_files:
-                file_bytes = uploaded.read()
-                filename = uploaded.name
-
-                if filename.lower().endswith(".pdf"):
-                    pages = convert_from_bytes(file_bytes)
-                    for i, page in enumerate(pages, start=1):
-                        buf = BytesIO()
-                        page.save(buf, format="JPEG")
-                        np_img = np.frombuffer(buf.getvalue(), np.uint8)
-                        image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-
-                        decision, _, _, elapsed_time = processor._classify(image, f"{filename}_page{i}")
-
-                        # Print decision before image
-                        if decision.lower() == "yes":
-                            st.markdown(f"### ✅ Is Seal (Page {i}): Yes")
-                        else:
-                            st.markdown(f"### ❌ Is Seal (Page {i}): No")
-
-                        st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), caption=f"{filename} (Page {i})")
-
-                        results.append([filename, "pdf", decision, round(elapsed_time, 2)])
-                        writer.writerow([filename, "pdf", decision, round(elapsed_time, 2)])
-
+    for uploaded_file in uploaded_files:
+        filename = uploaded_file.name
+        bytes_data = uploaded_file.read()
+        if filename.lower().endswith(".pdf"):
+            pages = convert_from_path(BytesIO(bytes_data))
+            for i, page in enumerate(pages, start=1):
+                buffer = BytesIO()
+                page.save(buffer, format="JPEG")
+                np_img = np.frombuffer(buffer.getvalue(), np.uint8)
+                image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
+                processor = Processor(analyzer, Config)
+                decision, response, step_used, elapsed_time, tokens_used, spec_text = processor._classify(
+                    image, f"{filename}_page{i}", "pdf", page=i
+                )
+                if decision.lower() == "yes":
+                    st.markdown(f"### ✅ Is Seal: Yes")
                 else:
-                    np_img = np.frombuffer(file_bytes, np.uint8)
-                    image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-
-                    decision, response, tokens, elapsed_time = processor._classify(image, filename)
-
-                    # Print decision before image
-                    if decision.lower() == "yes":
-                        st.markdown(f"### ✅ Is Seal: Yes")
-                    else:
-                        st.markdown(f"### ❌ Is Seal: No")
-
-                    st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), caption=f"{filename}")
-
-                    results.append([filename, "image", decision, round(elapsed_time, 2)])
-                    writer.writerow([filename, "image", decision, round(elapsed_time, 2)])
-
-        st.success("Classification complete. Log file generated.")
-
-        df = pd.DataFrame(results, columns=["filename", "filetype", "detection", "time_sec"])
-        st.dataframe(df)
-
-        with open(Config.LOG_FILE, "r", encoding="utf-8") as f:
-            st.download_button("Download Log CSV", f, file_name="classification_log.csv")
-
-
-if __name__ == "__main__":
-    main()
+                    st.markdown(f"### ❌ Is Seal: No")
+                st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), caption=f"{filename} (Page {i})")
+        else:
+            np_img = np.frombuffer(bytes_data, np.uint8)
+            image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
+            processor = Processor(analyzer, Config)
+            decision, response, step_used, elapsed_time, tokens_used, spec_text = processor._classify(
+                image, filename, "image"
+            )
+            if decision.lower() == "yes":
+                st.markdown(f"### ✅ Is Seal: Yes")
+            else:
+                st.markdown(f"### ❌ Is Seal: No")
+            st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), caption=f"{filename}")
