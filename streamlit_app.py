@@ -220,7 +220,7 @@ class Processor:
         else:
             spec_text = "There was no detection of seal, stamp, or handwritten signature."
 
-        return final_decision, response_text, step_used, total_time, total_tokens, spec_text
+        return final_decision, response_text, step_used, total_time, total_tokens, spec_text, image
 
 
 # ---------------- Streamlit Application ---------------- #
