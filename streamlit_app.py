@@ -8,6 +8,7 @@ import base64
 import shutil
 import numpy as np
 import time
+import tempfile
 from io import BytesIO, StringIO
 from pdf2image import convert_from_path
 from openai import AzureOpenAI
