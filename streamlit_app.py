@@ -25,7 +25,6 @@ class Config:
 
     # ---- Root Settings ----
     ROOT_DIR = st.secrets["ROOT_DIR"]
-    # INPUT_PATH = st.secrets("INPUT_PATH", "image.jpg")
 
     # ---- Derived Paths ----
     OUTPUT_YES = os.path.join(ROOT_DIR, "yes")
@@ -165,7 +164,7 @@ def main():
 
         with open(Config.LOG_FILE, "w", newline="", encoding="utf-8") as log_file:
             writer = csv.writer(log_file)
-            writer.writerow(["filename", "filetype", "decision", "response_text", "tokens_used", "time_sec"])
+            writer.writerow(["filename", "filetype", "detection", "time_sec"])
 
             for uploaded in uploaded_files:
                 file_bytes = uploaded.read()
@@ -179,7 +178,7 @@ def main():
                         np_img = np.frombuffer(buf.getvalue(), np.uint8)
                         image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
 
-                        decision, response, tokens, elapsed_time = processor._classify(image, f"{filename}_page{i}")
+                        decision, _, _, elapsed_time = processor._classify(image, f"{filename}_page{i}")
 
                         # Print decision before image
                         if decision.lower() == "yes":
@@ -189,8 +188,8 @@ def main():
 
                         st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), caption=f"{filename} (Page {i})")
 
-                        results.append([filename, "pdf", decision, response, tokens, round(elapsed_time, 2)])
-                        writer.writerow([filename, "pdf", decision, response, tokens, round(elapsed_time, 2)])
+                        results.append([filename, "pdf", decision, round(elapsed_time, 2)])
+                        writer.writerow([filename, "pdf", decision, round(elapsed_time, 2)])
 
                 else:
                     np_img = np.frombuffer(file_bytes, np.uint8)
@@ -211,7 +210,7 @@ def main():
 
         st.success("Classification complete. Log file generated.")
 
-        df = pd.DataFrame(results, columns=["filename", "filetype", "decision", "response_text", "tokens_used", "time_sec"])
+        df = pd.DataFrame(results, columns=["filename", "filetype", "detection", "time_sec"])
         st.dataframe(df)
 
         with open(Config.LOG_FILE, "r", encoding="utf-8") as f:
