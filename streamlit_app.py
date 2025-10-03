@@ -273,7 +273,7 @@ if uploaded_files:
 
         elif file_ext == "pdf":
             from pdf2image import convert_from_bytes
-            pages = convert_from_bytes(file_bytes)
+            pages = convert_from_path(uploaded_file)
 
             for i, page in enumerate(pages, start=1):
                 buffer = BytesIO()
