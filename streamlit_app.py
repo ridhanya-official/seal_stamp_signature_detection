@@ -227,40 +227,72 @@ class Processor:
 st.set_page_config(page_title="Seal/Stamp/Signature Detection", layout="wide")
 st.title("📄 Seal/Stamp/Signature Detection")
 
-uploaded_files = st.file_uploader("Upload images or PDFs", accept_multiple_files=True, type=["jpg","jpeg","png","pdf"])
+Config.init_dirs()
+analyzer = GPTImageAnalyzer(Config)
+processor = Processor(analyzer, Config)
 
-if uploaded_files:
-    Config.init_dirs()
-    analyzer = GPTImageAnalyzer(Config)
+uploaded_file = st.file_uploader("Upload an image or PDF", type=["jpg", "jpeg", "png", "pdf"])
 
-    for uploaded_file in uploaded_files:
-        filename = uploaded_file.name
-        bytes_data = uploaded_file.read()
-        if filename.lower().endswith(".pdf"):
-            pages = convert_from_path(BytesIO(bytes_data))
-            for i, page in enumerate(pages, start=1):
-                buffer = BytesIO()
-                page.save(buffer, format="JPEG")
-                np_img = np.frombuffer(buffer.getvalue(), np.uint8)
-                image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-                processor = Processor(analyzer, Config)
-                decision, response, step_used, elapsed_time, tokens_used, spec_text = processor._classify(
-                    image, f"{filename}_page{i}", "pdf", page=i
-                )
-                if decision.lower() == "yes":
-                    st.markdown(f"### ✅ Is Seal: Yes")
-                else:
-                    st.markdown(f"### ❌ Is Seal: No")
-                st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), caption=f"{filename} (Page {i})")
+if uploaded_file:
+    file_bytes = uploaded_file.read()
+    filename = uploaded_file.name
+    file_ext = filename.split(".")[-1].lower()
+
+    csv_buffer = BytesIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(["filename", "filetype", "page", "decision", "step_used", "response_text", "time_taken_sec", "tokens_used", "specification"])
+
+    if file_ext in ["jpg", "jpeg", "png"]:
+        nparr = np.frombuffer(file_bytes, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        decision, response, step_used, elapsed_time, tokens_used, spec_text, enhanced_image = processor._classify(image, os.path.splitext(filename)[0])
+
+        # Print decision
+        if decision.lower() == "yes":
+            st.markdown(f"### ✅ Is Seal: Yes")
         else:
-            np_img = np.frombuffer(bytes_data, np.uint8)
+            st.markdown(f"### ❌ Is Seal: No")
+
+        # Resize image for display
+        h, w = enhanced_image.shape[:2]
+        max_width = 600
+        if w > max_width:
+            scale = max_width / w
+            enhanced_image = cv2.resize(enhanced_image, (int(w * scale), int(h * scale)))
+
+        st.image(cv2.cvtColor(enhanced_image, cv2.COLOR_BGR2RGB), caption=f"{filename}")
+
+        writer.writerow([filename, "image", "-", decision, step_used, response, round(elapsed_time, 2), tokens_used, spec_text])
+
+    elif file_ext == "pdf":
+        from pdf2image import convert_from_bytes
+        pages = convert_from_bytes(file_bytes)
+        for i, page in enumerate(pages, start=1):
+            buffer = BytesIO()
+            page.save(buffer, format="JPEG")
+            np_img = np.frombuffer(buffer.getvalue(), np.uint8)
             image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-            processor = Processor(analyzer, Config)
-            decision, response, step_used, elapsed_time, tokens_used, spec_text = processor._classify(
-                image, filename, "image"
-            )
+            decision, response, step_used, elapsed_time, tokens_used, spec_text, enhanced_image = processor._classify(image, f"{os.path.splitext(filename)[0]}_page{i}")
+
             if decision.lower() == "yes":
-                st.markdown(f"### ✅ Is Seal: Yes")
+                st.markdown(f"### ✅ Page {i} - Is Seal: Yes")
             else:
-                st.markdown(f"### ❌ Is Seal: No")
-            st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), caption=f"{filename}")
+                st.markdown(f"### ❌ Page {i} - Is Seal: No")
+
+            h, w = enhanced_image.shape[:2]
+            max_width = 600
+            if w > max_width:
+                scale = max_width / w
+                enhanced_image = cv2.resize(enhanced_image, (int(w * scale), int(h * scale)))
+            st.image(cv2.cvtColor(enhanced_image, cv2.COLOR_BGR2RGB), caption=f"Page {i}")
+
+            writer.writerow([filename, "pdf", i, decision, step_used, response, round(elapsed_time, 2), tokens_used, spec_text])
+
+    # Download CSV
+    csv_buffer.seek(0)
+    st.download_button(
+        label="📥 Download Classification CSV",
+        data=csv_buffer.getvalue(),
+        file_name="classification_log.csv",
+        mime="text/csv"
+    )
