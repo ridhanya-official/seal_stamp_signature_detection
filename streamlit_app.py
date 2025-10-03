@@ -24,7 +24,7 @@ class Config:
     """Holds configuration constants for the pipeline."""
 
     # ---- Root Settings ----
-    ROOT_DIR = st.secrets("ROOT_DIR", "output")
+    ROOT_DIR = st.secrets("ROOT_DIR")
     INPUT_PATH = st.secrets("INPUT_PATH", "image.jpg")
 
     # ---- Derived Paths ----
