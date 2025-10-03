@@ -273,7 +273,12 @@ if uploaded_files:
 
         elif file_ext == "pdf":
             from pdf2image import convert_from_bytes
-            pages = convert_from_path(uploaded_file)
+            # Save PDF temporarily
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                tmp_path = tmp_file.name
+                
+            pages = convert_from_path(tmp_path)
 
             for i, page in enumerate(pages, start=1):
                 buffer = BytesIO()
