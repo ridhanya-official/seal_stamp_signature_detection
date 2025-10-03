@@ -8,7 +8,7 @@ import base64
 import shutil
 import numpy as np
 import time
-from io import BytesIO
+from io import BytesIO, StringIO
 from pdf2image import convert_from_path
 from openai import AzureOpenAI
 from prompt import prompt_v2
@@ -238,7 +238,7 @@ if uploaded_file:
     filename = uploaded_file.name
     file_ext = filename.split(".")[-1].lower()
 
-    csv_buffer = BytesIO()
+    csv_buffer = StringIO()
     writer = csv.writer(csv_buffer)
     writer.writerow(["filename", "filetype", "page", "decision", "step_used", "response_text", "time_taken_sec", "tokens_used", "specification"])
 
@@ -268,7 +268,7 @@ if uploaded_file:
         from pdf2image import convert_from_bytes
         pages = convert_from_bytes(file_bytes)
         for i, page in enumerate(pages, start=1):
-            buffer = BytesIO()
+            buffer = StringIO()
             page.save(buffer, format="JPEG")
             np_img = np.frombuffer(buffer.getvalue(), np.uint8)
             image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
