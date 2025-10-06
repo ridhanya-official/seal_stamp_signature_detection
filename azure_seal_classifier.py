@@ -21,7 +21,7 @@ class Config:
     """Holds configuration constants for the pipeline."""
 
     # ---- Root Settings ----
-    ROOT_DIR = os.getenv("ROOT_DIR", "output")
+    ROOT_DIR = os.getenv("ROOT_DIR", "temp_output")
     INPUT_PATH = os.getenv("INPUT_PATH", "image.jpg")
 
     # ---- Derived Paths ----
@@ -103,7 +103,7 @@ class GPTImageAnalyzer:
             "Please provide:\n"
             "1. Type: seal / stamp / handwritten signature\n"
             "2. Brief description of its appearance\n"
-            "3. Approximate location in the image (e.g., top-right corner)\n"
+            "3. Describe the location in the image\n"
         )
 
         start_time = time.time()
@@ -123,7 +123,7 @@ class GPTImageAnalyzer:
                                 "detail": "high",
                             },
                         },
-                        {"type": "text", "text": prompt},
+                        {"type": "text", "text": prompt_v2 + prompt},
                     ],
                 },
             ],
@@ -180,7 +180,6 @@ class Processor:
             ("original", lambda x: x),
             ("coloured", Enhancer.coloured),
             ("sharpened", Enhancer.sharpen),
-            ("gaussian", Enhancer.gaussian),
         ]
 
         final_decision = "no"
@@ -213,7 +212,8 @@ class Processor:
 
         # fallback equalized if none detected
         if final_decision == "no":
-            equalized_image = Enhancer.equalize(current_image)
+            gaussian_image = Enhancer.gaussian(current_image)
+            equalized_image = Enhancer.equalize(gaussian_image)
             _, buffer = cv2.imencode(".jpg", equalized_image)
             result = self.analyzer.analyze(buffer.tobytes())
             response_text = result["text"]
@@ -235,7 +235,7 @@ class Processor:
             total_tokens += spec_result["tokens"]
             total_time += spec_result["time"]
         else:
-            spec_text = ""
+            spec_text = "No seals, stamps, or handwritten signatures on the document were detected."
 
         return final_decision, response_text, step_used, total_time, total_tokens, spec_text
 
@@ -276,8 +276,8 @@ class ImageProcessor(Processor):
 class PDFProcessor(Processor):
     """Processes PDF files page by page."""
 
-    def process(self, file_path, writer):
-        pages = convert_from_path(file_path)
+    def process(self, file_path, writer, progress_callback=None):
+        pages = convert_from_path(file_path, dpi=220)
 
         for i, page in enumerate(pages, start=1):
             buffer = BytesIO()
@@ -311,6 +311,8 @@ class PDFProcessor(Processor):
             ])
             print(f"{file_path} (Page {i}) → {decision.upper()} ({step_used}) | Time: {elapsed_time:.2f}s | Tokens: {tokens_used}")
 
+            if progress_callback:
+                progress_callback()
 
 # ---------------- Main Application ---------------- #
 class ClassifierApp:
@@ -340,13 +342,16 @@ class ClassifierApp:
             else:
                 print("Invalid INPUT_PATH. Must be a folder or a file.")
 
-    def _process_file(self, file_path, writer):
+    def _process_file(self, file_path, writer, progress_callback=None):
         if file_path.lower().endswith((".jpg", ".jpeg", ".png")):
             self.img_processor.process(file_path, writer)
+            if progress_callback:
+                progress_callback()
         elif file_path.lower().endswith(".pdf"):
-            self.pdf_processor.process(file_path, writer)
+            self.pdf_processor.process(file_path, writer, progress_callback)
         else:
             print(f"Skipping unsupported file: {file_path}")
+
 
 
 # ---------------- Run ---------------- #
