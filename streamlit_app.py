@@ -6,6 +6,7 @@ import os
 import time
 import streamlit as st
 from dotenv import load_dotenv
+from prompt import prompt_v2
 from azure_seal_classifier import ClassifierApp  
 
 load_dotenv()
@@ -29,7 +30,9 @@ class Config:
     ENDPOINT = st.secrets["AZURE_ENDPOINT"]
     API_VERSION = st.secrets["AZURE_API_VERSION"]
     MODEL_NAME = st.secrets["AZURE_DEPLOYMENT_NAME"]
-
+    
+    PROMPT = prompt_v2
+    
     @staticmethod
     def init_dirs():
         os.makedirs(Config.OUTPUT_YES, exist_ok=True)
