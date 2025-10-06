@@ -234,7 +234,7 @@ processor = Processor(analyzer, Config)
 
 # Allow multiple file upload
 uploaded_files = st.file_uploader(
-    "Upload images or PDFs (multiple allowed)", 
+    "Upload images (multiple allowed)", 
     type=["jpg", "jpeg", "png"], 
     accept_multiple_files=True
 )
