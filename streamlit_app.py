@@ -40,13 +40,31 @@ class Config:
 st.set_page_config(page_title="Seal/Stamp/Classify App", layout="wide")
 st.title("Seal / Stamp / Handwritten Signature Classifier")
 
+# ---------------- Session State Setup ---------------- #
+if 'uploaded_files' not in st.session_state:
+    st.session_state.uploaded_files = []
+
 # File uploader
 uploaded_files = st.file_uploader(
     "Upload images or PDFs",
     type=["jpg", "jpeg", "png", "pdf"],
-    accept_multiple_files=True
+    accept_multiple_files=True,
+    key="file_uploader"
 )
 
+# Save uploaded files in session state
+if uploaded_files:
+    st.session_state.uploaded_files = uploaded_files
+
+# Button to clear all uploaded files
+if st.button("Clear All Uploaded Files"):
+    st.session_state.uploaded_files = []
+    st.experimental_rerun()
+
+# Use session state for further processing
+uploaded_files = st.session_state.uploaded_files
+
+# ---------------- Processing ---------------- #
 if uploaded_files:
     start_time = time.time()
 
