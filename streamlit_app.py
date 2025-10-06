@@ -4,7 +4,6 @@ import tempfile
 import pandas as pd
 import os
 import time
-import streamlit as st
 from dotenv import load_dotenv
 from prompt import prompt_v2
 from azure_seal_classifier import ClassifierApp  
@@ -13,19 +12,14 @@ load_dotenv()
 
 # ---------------- Config ---------------- #
 class Config:
-    """Holds configuration constants for the pipeline."""
-
-    # ---- Root Settings ----
     ROOT_DIR = st.secrets["ROOT_DIR"]
     INPUT_PATH = st.secrets["INPUT_PATH"]
 
-    # ---- Derived Paths ----
     OUTPUT_YES = os.path.join(ROOT_DIR, "yes")
     OUTPUT_NO = os.path.join(ROOT_DIR, "no")
-    LOG_FILE = os.path.join(ROOT_DIR, f"classification_log.csv")
+    LOG_FILE = os.path.join(ROOT_DIR, "classification_log.csv")
     ENHANCED_DIR = os.path.join(ROOT_DIR, "enhanced_images")
 
-    # ---- Azure OpenAI configuration ----
     API_KEY = st.secrets["AZURE_API_KEY"]
     ENDPOINT = st.secrets["AZURE_ENDPOINT"]
     API_VERSION = st.secrets["AZURE_API_VERSION"]
@@ -38,7 +32,8 @@ class Config:
         os.makedirs(Config.OUTPUT_YES, exist_ok=True)
         os.makedirs(Config.OUTPUT_NO, exist_ok=True)
         os.makedirs(Config.ENHANCED_DIR, exist_ok=True)
-        
+
+# ---------------- Streamlit Page ---------------- #
 st.set_page_config(page_title="Seal/Stamp/Classify App", layout="wide")
 st.title("Seal / Stamp / Handwritten Signature Classifier")
 
@@ -51,8 +46,6 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
     start_time = time.time()
-
-    # Upload progress
     upload_progress = st.progress(0)
     upload_status = st.empty()
 
@@ -66,15 +59,15 @@ if uploaded_files:
             upload_progress.progress((idx + 1) / len(uploaded_files))
             upload_status.text(f"Uploaded {idx + 1} of {len(uploaded_files)} files...")
 
-        # After upload
         upload_progress.empty()
         upload_status.empty()
         st.success(f"Uploaded {len(uploaded_files)} files successfully!")
 
-        # Update Config
         Config.INPUT_PATH = tmpdir
+        Config.init_dirs()
+        app = ClassifierApp(Config)
 
-        # ---------------- Add processing progress ---------------- #
+        # Calculate total pages for progress bar
         total_files = 0
         for uploaded_file in uploaded_files:
             if uploaded_file.name.lower().endswith(".pdf"):
@@ -85,87 +78,62 @@ if uploaded_files:
                 total_files += 1
 
         process_progress = st.progress(0)
-        process_status = st.empty()
         processed_count = 0
+        results_container = st.container()
 
-        app = ClassifierApp(Config)
-        Config.init_dirs()
-
+        import csv
         with open(Config.LOG_FILE, "w", newline="", encoding="utf-8") as log_file:
-            import csv
             writer = csv.writer(log_file)
             writer.writerow([
                 "filename", "filetype", "page", "decision", "step_used",
                 "response_text", "time_taken_sec", "tokens_used", "specification"
             ])
 
+            # ---------------- Processing Loop ---------------- #
             for uploaded_file in uploaded_files:
                 file_path = os.path.join(tmpdir, uploaded_file.name)
 
                 def update_progress():
-                    global processed_count
+                    nonlocal processed_count
                     processed_count += 1
                     process_progress.progress(processed_count / total_files)
 
-                # ✅ Spinner context
                 with st.spinner(f"Processing {uploaded_file.name} ..."):
-                    app._process_file(file_path, writer, progress_callback=update_progress)
+                    # Process file and get results as list of dicts
+                    file_results = app._process_file(file_path, writer, progress_callback=update_progress)
 
-        process_status.text("Finalizing results...")
+                    # Display each result immediately
+                    for row in file_results:
+                        with results_container.expander(f"{row['filename']} → Seal? {str(row['decision']).upper()}", expanded=False):
+                            st.markdown(f"**Step Used:** {row['step_used']}")
+                            st.markdown(f"**Specification:** {row['specification']}")
+
+                            if row['filetype'] == 'image':
+                                img_path = os.path.join(Config.INPUT_PATH, row['filename'])
+                            else:
+                                page_img_name = f"{os.path.splitext(row['filename'])[0]}_page{row['page']}.jpg"
+                                yes_path = os.path.join(Config.OUTPUT_YES, page_img_name)
+                                no_path = os.path.join(Config.OUTPUT_NO, page_img_name)
+                                img_path = yes_path if os.path.exists(yes_path) else no_path
+
+                            if os.path.exists(img_path):
+                                st.image(img_path, use_container_width=True)
+                            else:
+                                st.warning("Image not found for display.")
+
         process_progress.empty()
-
-
-        # ---------------- Display Results ---------------- #
-        log_df = pd.read_csv(Config.LOG_FILE)
-
-        st.subheader("Classification Results")
-        for idx, row in log_df.iterrows():
-            filetype = row['filetype']
-            filename = row['filename']
-            page = row['page']
-            decision = row['decision']
-            step_used = row['step_used']
-            spec_text = row['specification']
-
-            display_title = f"{filename}"
-            if filetype == 'pdf':
-                display_title += f' - Page {page}'
-
-            with st.expander(f"{display_title} → Seal? {str(decision).upper()}"):
-                # st.markdown(f"**Step Used:** {step_used}")
-                # st.markdown(f"**Specification:** {spec_text}")
-                col1, _, _ = st.columns([1, 1, 1])
-                with col1:
-                    if filetype == 'image':
-                        img_path = os.path.join(Config.INPUT_PATH, filename)
-                    else:  # pdf page
-                        page_img_name = f"{os.path.splitext(filename)[0]}_page{page}.jpg"
-                        yes_path = os.path.join(Config.OUTPUT_YES, page_img_name)
-                        no_path = os.path.join(Config.OUTPUT_NO, page_img_name)
-                        img_path = yes_path if os.path.exists(yes_path) else no_path
-                    if os.path.exists(img_path):
-                        st.image(img_path, use_container_width=True)
-                    else:
-                        st.warning("Image not found for display.")
-
-        # ---------------- Completion and CSV Download ---------------- #
         elapsed = time.time() - start_time
-        if elapsed > 60:
-            minutes = elapsed / 60
-            st.success(f"Processing completed in {minutes:.2f} minutes!")
-        else:
-            st.success(f"Processing completed in {elapsed:.2f} seconds!")
+        st.success(f"Processing completed in {elapsed:.2f} seconds!")
 
-        # ✅ Filter CSV before download
+        # ---------------- CSV Download ---------------- #
+        log_df = pd.read_csv(Config.LOG_FILE)
         simplified_df = log_df[['filename', 'page', 'decision']].copy()
         simplified_df.rename(columns={'decision': 'is_seal_detected'}, inplace=True)
 
-        csv_data = simplified_df.to_csv(index=False).encode('utf-8') #log_df
+        csv_data = simplified_df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="Download Classification CSV",
             data=csv_data,
             file_name="classification_log.csv",
             mime='text/csv'
         )
-
-
