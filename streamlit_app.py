@@ -129,8 +129,8 @@ if uploaded_files:
                 display_title += f' - Page {page}'
 
             with st.expander(f"{display_title} → Seal? {str(decision).upper()}"):
-                st.markdown(f"**Step Used:** {step_used}")
-                st.markdown(f"**Specification:** {spec_text}")
+                # st.markdown(f"**Step Used:** {step_used}")
+                # st.markdown(f"**Specification:** {spec_text}")
 
                 col1, _, _ = st.columns([1, 1, 1])
                 with col1:
