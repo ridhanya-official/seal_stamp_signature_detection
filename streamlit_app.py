@@ -1,20 +1,12 @@
-# pylint: disable=all
-
-# ---------------- Imports ---------------- #
-import os
-import cv2
-import csv
-import base64
-import shutil
-import numpy as np
-import time
-import tempfile
-from io import BytesIO, StringIO
-from pdf2image import convert_from_path
-from openai import AzureOpenAI
-from prompt import prompt_v2
-from dotenv import load_dotenv
+# ---------------- Streamlit Wrapper ---------------- #
 import streamlit as st
+import tempfile
+import pandas as pd
+import os
+import time
+import streamlit as st
+from dotenv import load_dotenv
+from azure_seal_classifier import ClassifierApp  
 
 load_dotenv()
 
@@ -24,6 +16,7 @@ class Config:
 
     # ---- Root Settings ----
     ROOT_DIR = st.secrets["ROOT_DIR"]
+    INPUT_PATH = st.secrets["INPUT_PATH"]
 
     # ---- Derived Paths ----
     OUTPUT_YES = os.path.join(ROOT_DIR, "yes")
@@ -44,264 +37,134 @@ class Config:
         os.makedirs(Config.OUTPUT_YES, exist_ok=True)
         os.makedirs(Config.OUTPUT_NO, exist_ok=True)
         os.makedirs(Config.ENHANCED_DIR, exist_ok=True)
+        
+st.set_page_config(page_title="Seal/Stamp/Classify App", layout="wide")
+st.title("Seal / Stamp / Handwritten Signature Classifier")
 
-# ---------------- Analyzer ---------------- #
-class GPTImageAnalyzer:
-    """Wrapper for Azure OpenAI GPT Vision model."""
-
-    def __init__(self, config: Config):
-        self.client = AzureOpenAI(
-            api_key=config.API_KEY,
-            api_version=config.API_VERSION,
-            azure_endpoint=config.ENDPOINT,
-        )
-        self.prompt = config.PROMPT
-        self.model = config.MODEL_NAME
-
-    def analyze(self, image_bytes: bytes) -> dict:
-        encoded_image = base64.b64encode(image_bytes).decode("ascii")
-        start_time = time.time()
-        response = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0,
-            max_tokens=1500,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{encoded_image}",
-                                "detail": "high",
-                            },
-                        },
-                        {"type": "text", "text": self.prompt},
-                    ],
-                },
-            ],
-        )
-        end_time = time.time()
-        tokens_used = response.usage.total_tokens if response.usage else 0
-        return {
-            "text": response.choices[0].message.content.strip(),
-            "tokens": tokens_used,
-            "time": end_time - start_time
-        }
-
-    def extract_specification(self, image_bytes: bytes) -> dict:
-        encoded_image = base64.b64encode(image_bytes).decode("ascii")
-        prompt = (
-            "The previous classification detected a seal, stamp, or handwritten signature.\n"
-            "Please provide:\n"
-            "1. Type: seal / stamp / handwritten signature\n"
-            "2. Brief description of its appearance\n"
-            "3. Approximate location in the image (e.g., top-right corner)\n"
-        )
-        start_time = time.time()
-        response = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0,
-            max_tokens=500,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{encoded_image}",
-                                "detail": "high",
-                            },
-                        },
-                        {"type": "text", "text": prompt},
-                    ],
-                },
-            ],
-        )
-        end_time = time.time()
-        tokens_used = response.usage.total_tokens if response.usage else 0
-        return {
-            "specification": response.choices[0].message.content.strip(),
-            "tokens": tokens_used,
-            "time": end_time - start_time
-        }
-
-
-# ---------------- Enhancer ---------------- #
-class Enhancer:
-    """Applies image enhancement techniques."""
-
-    @staticmethod
-    def coloured(img):
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
-        hsv[:, :, 0] *= 0.7
-        hsv[:, :, 1] *= 1.5
-        hsv[:, :, 2] *= 0.5
-        hsv = np.clip(hsv, 0, 255).astype(np.uint8)
-        return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-
-    @staticmethod
-    def gaussian(img):
-        return cv2.GaussianBlur(img, (7, 7), 0)
-
-    @staticmethod
-    def sharpen(img):
-        kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
-        return cv2.filter2D(img, -1, kernel)
-
-    @staticmethod
-    def equalize(img):
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        return cv2.equalizeHist(gray)
-
-
-# ---------------- Processor Base ---------------- #
-class Processor:
-    """Base processor with cascade decision logic."""
-
-    def __init__(self, analyzer: GPTImageAnalyzer, config: Config):
-        self.analyzer = analyzer
-        self.config = config
-
-    def _classify(self, image, base_name, filetype, page="-"):
-        steps = [
-            ("original", lambda x: x),
-            ("coloured", Enhancer.coloured),
-            ("sharpened", Enhancer.sharpen),
-            ("gaussian", Enhancer.gaussian),
-        ]
-
-        final_decision = "no"
-        response_text = ""
-        step_used = "none"
-        total_tokens = 0
-        total_time = 0.0
-        current_image = image
-
-        for step_name, func in steps:
-            enhanced_image = func(current_image)
-            _, buffer = cv2.imencode(".jpg", enhanced_image)
-            image_bytes = buffer.tobytes()
-            result = self.analyzer.analyze(image_bytes)
-            response_text = result["text"]
-            total_tokens += result["tokens"]
-            total_time += result["time"]
-            if response_text and "yes" in response_text.lower():
-                final_decision = "yes"
-                step_used = step_name
-                out_name = f"{base_name}_{step_name}.jpg"
-                cv2.imwrite(os.path.join(self.config.ENHANCED_DIR, out_name), enhanced_image)
-                current_image = enhanced_image
-                break
-            current_image = enhanced_image
-
-        if final_decision == "no":
-            equalized_image = Enhancer.equalize(current_image)
-            _, buffer = cv2.imencode(".jpg", equalized_image)
-            result = self.analyzer.analyze(buffer.tobytes())
-            response_text = result["text"]
-            total_tokens += result["tokens"]
-            total_time += result["time"]
-            if response_text and "yes" in response_text.lower():
-                final_decision = "yes"
-            step_used = "equalized"
-            out_name = f"{base_name}_equalized.jpg"
-            cv2.imwrite(os.path.join(self.config.ENHANCED_DIR, out_name), equalized_image)
-            current_image = equalized_image
-
-        if final_decision == "yes":
-            _, buffer = cv2.imencode(".jpg", current_image)
-            spec_result = self.analyzer.extract_specification(buffer.tobytes())
-            spec_text = spec_result["specification"]
-            total_tokens += spec_result["tokens"]
-            total_time += spec_result["time"]
-        else:
-            spec_text = "There was no detection of seal, stamp, or handwritten signature."
-
-        return final_decision, response_text, step_used, total_time, total_tokens, spec_text, image
-
-
-# ---------------- Streamlit Application ---------------- #
-st.set_page_config(page_title="Seal/Stamp/Signature Detection", layout="wide")
-st.title("📄 Seal/Stamp/Signature Detection")
-
-Config.init_dirs()
-analyzer = GPTImageAnalyzer(Config)
-processor = Processor(analyzer, Config)
-
-# Allow multiple file upload
+# File uploader
 uploaded_files = st.file_uploader(
-    "Upload images (multiple allowed)", 
-    type=["jpg", "jpeg", "png"], 
+    "Upload images or PDFs", 
+    type=["jpg", "jpeg", "png", "pdf"], 
     accept_multiple_files=True
 )
 
 if uploaded_files:
-    # Create CSV buffer once
-    csv_buffer = StringIO()
-    writer = csv.writer(csv_buffer)
-    writer.writerow(["filename", "filetype", "page", "decision", "step_used", 
-                     "response_text", "time_taken_sec", "tokens_used", "specification"])
+    start_time = time.time()
 
-    for uploaded_file in uploaded_files:
-        file_bytes = uploaded_file.read()
-        filename = uploaded_file.name
-        file_ext = filename.split(".")[-1].lower()
+    # Upload progress
+    upload_progress = st.progress(0)
+    upload_status = st.empty()
 
-        if file_ext in ["jpg", "jpeg", "png"]:
-            nparr = np.frombuffer(file_bytes, np.uint8)
-            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            decision, response, step_used, elapsed_time, tokens_used, spec_text, enhanced_image = processor._classify(
-                image, "image", os.path.splitext(filename)[0]
-            )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_paths = []
+        for idx, uploaded_file in enumerate(uploaded_files):
+            temp_path = os.path.join(tmpdir, uploaded_file.name)
+            with open(temp_path, "wb") as f:
+                f.write(uploaded_file.read())
+            input_paths.append(temp_path)
+            upload_progress.progress((idx + 1) / len(uploaded_files))
+            upload_status.text(f"Uploaded {idx + 1} of {len(uploaded_files)} files...")
 
-            st.markdown(f"### Is Seal ? {'✅ Yes' if decision.lower() == 'yes' else '❌ No'}")
+        # After upload
+        upload_progress.empty()
+        upload_status.empty()
+        st.success(f"Uploaded {len(uploaded_files)} files successfully!")
 
-            # Resize image before display
-            h, w = enhanced_image.shape[:2]
-            max_width = 600
-            if w > max_width:
-                scale = max_width / w
-                enhanced_image = cv2.resize(enhanced_image, (int(w * scale), int(h * scale)))
+        # Update Config
+        Config.INPUT_PATH = tmpdir
 
-            st.image(cv2.cvtColor(enhanced_image, cv2.COLOR_BGR2RGB), caption=filename)
+        # ---------------- Add processing progress ---------------- #
+        total_files = 0
+        for uploaded_file in uploaded_files:
+            if uploaded_file.name.lower().endswith(".pdf"):
+                from pdf2image import convert_from_path
+                pages = convert_from_path(os.path.join(tmpdir, uploaded_file.name), dpi=220)
+                total_files += len(pages)
+            else:
+                total_files += 1
 
-            writer.writerow([filename, "image", "-", decision, step_used, response, 
-                             round(elapsed_time, 2), tokens_used, spec_text])
+        process_progress = st.progress(0)
+        process_status = st.empty()
+        processed_count = 0
 
-        elif file_ext == "pdf":
-            from pdf2image import convert_from_bytes                
-            pages = convert_from_bytes(file_bytes)
-            
-            for i, page in enumerate(pages, start=1):
-                buffer = BytesIO()
-                page.save(buffer, format="JPEG")
-                np_img = np.frombuffer(buffer.getvalue(), np.uint8)
-                image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-                decision, response, step_used, elapsed_time, tokens_used, spec_text, enhanced_image = processor._classify(
-                    image, "pdf", f"{os.path.splitext(filename)[0]}_page{i}"
-                )
+        app = ClassifierApp(Config)
+        Config.init_dirs()
 
-                st.markdown(f"### Is Seal ? {'✅ Yes' if decision.lower() == 'yes' else '❌ No'}")
+        with open(Config.LOG_FILE, "w", newline="", encoding="utf-8") as log_file:
+            import csv
+            writer = csv.writer(log_file)
+            writer.writerow([
+                "filename", "filetype", "page", "decision", "step_used",
+                "response_text", "time_taken_sec", "tokens_used", "specification"
+            ])
 
-                h, w = enhanced_image.shape[:2]
-                max_width = 600
-                if w > max_width:
-                    scale = max_width / w
-                    enhanced_image = cv2.resize(enhanced_image, (int(w * scale), int(h * scale)))
-                st.image(cv2.cvtColor(enhanced_image, cv2.COLOR_BGR2RGB), caption=f"{filename} - Page {i}")
+            for uploaded_file in uploaded_files:
+                file_path = os.path.join(tmpdir, uploaded_file.name)
 
-                writer.writerow([filename, "pdf", i, decision, step_used, response, 
-                                 round(elapsed_time, 2), tokens_used, spec_text])
+                def update_progress():
+                    global processed_count
+                    processed_count += 1
+                    process_progress.progress(processed_count / total_files)
 
-    # Download one CSV for all files
-    csv_buffer.seek(0)
-    st.download_button(
-        label="📥 Download Detection CSV",
-        data=csv_buffer.getvalue().encode("utf-8"),
-        file_name="detection_log.csv",
-        mime="text/csv"
-    )
+                # ✅ Spinner context
+                with st.spinner(f"Processing {uploaded_file.name} ..."):
+                    app._process_file(file_path, writer, progress_callback=update_progress)
+
+        process_status.text("Finalizing results...")
+        process_progress.empty()
+
+
+        # ---------------- Display Results ---------------- #
+        log_df = pd.read_csv(Config.LOG_FILE)
+
+        st.subheader("Classification Results")
+        for idx, row in log_df.iterrows():
+            filetype = row['filetype']
+            filename = row['filename']
+            page = row['page']
+            decision = row['decision']
+            step_used = row['step_used']
+            spec_text = row['specification']
+
+            display_title = f"{filename}"
+            if filetype == 'pdf':
+                display_title += f' - Page {page}'
+
+            with st.expander(f"{display_title} → Seal? {str(decision).upper()}"):
+                # st.markdown(f"**Step Used:** {step_used}")
+                # st.markdown(f"**Specification:** {spec_text}")
+                col1, _, _ = st.columns([1, 1, 1])
+                with col1:
+                    if filetype == 'image':
+                        img_path = os.path.join(Config.INPUT_PATH, filename)
+                    else:  # pdf page
+                        page_img_name = f"{os.path.splitext(filename)[0]}_page{page}.jpg"
+                        yes_path = os.path.join(Config.OUTPUT_YES, page_img_name)
+                        no_path = os.path.join(Config.OUTPUT_NO, page_img_name)
+                        img_path = yes_path if os.path.exists(yes_path) else no_path
+                    if os.path.exists(img_path):
+                        st.image(img_path, use_container_width=True)
+                    else:
+                        st.warning("Image not found for display.")
+
+        # ---------------- Completion and CSV Download ---------------- #
+        elapsed = time.time() - start_time
+        if elapsed > 60:
+            minutes = elapsed / 60
+            st.success(f"Processing completed in {minutes:.2f} minutes!")
+        else:
+            st.success(f"Processing completed in {elapsed:.2f} seconds!")
+
+        # ✅ Filter CSV before download
+        simplified_df = log_df[['filename', 'page', 'decision']].copy()
+        simplified_df.rename(columns={'decision': 'is_seal_detected'}, inplace=True)
+
+        csv_data = simplified_df.to_csv(index=False).encode('utf-8') #log_df
+        st.download_button(
+            label="Download Classification CSV",
+            data=csv_data,
+            file_name="classification_log.csv",
+            mime='text/csv'
+        )
+
+
