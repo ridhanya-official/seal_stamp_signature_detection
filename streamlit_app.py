@@ -30,8 +30,6 @@ class Config:
     API_VERSION = st.secrets["AZURE_API_VERSION"]
     MODEL_NAME = st.secrets["AZURE_DEPLOYMENT_NAME"]
 
-    PROMPT = prompt_v2
-
     @staticmethod
     def init_dirs():
         os.makedirs(Config.OUTPUT_YES, exist_ok=True)
