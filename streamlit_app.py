@@ -94,7 +94,7 @@ if uploaded_files:
                 file_path = os.path.join(tmpdir, uploaded_file.name)
 
                 def update_progress():
-                    nonlocal processed_count
+                    global processed_count
                     processed_count += 1
                     process_progress.progress(processed_count / total_files)
 
